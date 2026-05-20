@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PromoCode</title>
+
+  <!--
+    api.js  — all fetch() calls live here. Zero business logic.
+    app.js  — UI state + event wiring. Reads from api.js, writes to ui.js.
+    ui.js   — DOM mutations only. No fetch, no state.
+
+    Why split like this?
+      • api.js can be unit-tested with a mock fetch, no DOM needed.
+      • ui.js can be tested by calling its functions directly.
+      • app.js is the only layer that knows about BOTH.
+      • Swapping the backend URL = touch api.js only.
+      • Redesigning the UI = touch ui.js only.
+  -->
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Design tokens ────────────────────────────────────────────── */
+    :root {
+      --bg:         #0d0d0d;
+      --surface:    #161616;
+      --border:     #2a2a2a;
+      --accent:     #c8f13e;   /* electric lime — the one unforgettable detail */
+      --accent-dim: #8aaa22;
+      --text:       #f0f0ee;
+      --text-muted: #666;
+      --font-mono:  "Space Mono", monospace;
+      --font-sans:  "DM Sans", sans-serif;
+      --radius:     6px;
+      --transition: 140ms ease;
+    }
+
+    /* ── Reset ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 4rem 1.5rem 6rem;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────────── */
+    .wrapper { width: 100%; max-width: 480px; }
+
+    header { margin-bottom: 3.5rem; }
+    header h1 {
+      font-family: var(--font-mono);
+      font-size: clamp(1.6rem, 5vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+    header h1 span { color: var(--accent); }
+    header p {
+      margin-top: 0.5rem;
+      color: var(--text-muted);
+      font-size: 14px;
+      font-weight: 300;
+    }
+
+    /* ── Panel (shared card style) ────────────────────────────────── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .panel-label {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+
+    /* ── Buttons ────────────────────────────────────────────────────── */
+    button {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background var(--transition), color var(--transition), opacity var(--transition);
+    }
+    button.primary {
+      background: var(--accent);
+      color: #0d0d0d;
+      width: 100%;
+      padding: 0.75rem 1rem;
+    }
+    button.primary:hover { background: #d6ff50; }
+    button.primary:active { transform: scale(0.99); }
+    button.primary:disabled { opacity: 0.35; cursor: not-allowed; }
+    button.ghost {
+      background: transparent;
+      color: var(--accent);
+      padding: 0.4rem 0.75rem;
+      font-size: 11px;
+    }
+    button.ghost:hover { background: rgba(200,241,62,0.08); }
+
+    /* ── Code display ───────────────────────────────────────────────── */
+    .code-box {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.9rem 1rem;
+      margin-top: 1rem;
+      min-height: 52px;
+    }
+    .code-value {
+      font-family: var(--font-mono);
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--accent);
+      word-break: break-all;
+      flex: 1;
+    }
+    .code-value.empty { color: var(--text-muted); font-size: 0.9rem; font-weight: 400; }
+
+    /* ── Text input ─────────────────────────────────────────────────── */
+    .input-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+    input[type="text"] {
+      flex: 1;
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: var(--font-mono);
+      font-size: 0.95rem;
+      padding: 0.65rem 0.85rem;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: var(--text-muted); }
+
+    /* ── Status badge ───────────────────────────────────────────────── */
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.9rem;
+      padding: 0.6rem 0.85rem;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-family: var(--font-mono);
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 200ms, transform 200ms;
+    }
+    .status.visible { opacity: 1; transform: translateY(0); }
+    .status.valid   { background: rgba(200,241,62,0.1); color: var(--accent); border: 1px solid rgba(200,241,62,0.25); }
+    .status.invalid { background: rgba(255,80,80,0.1);  color: #ff6b6b;       border: 1px solid rgba(255,80,80,0.25); }
+    .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+
+    /* ── History list ───────────────────────────────────────────────── */
+    .history-panel { opacity: 0; transform: translateY(6px); transition: opacity 300ms, transform 300ms; }
+    .history-panel.visible { opacity: 1; transform: translateY(0); }
+    .history-list { list-style: none; display: flex; flex-direction: column; gap: 0.4rem; max-height: 220px; overflow-y: auto; }
+    .history-list li {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-muted);
+    }
+    .history-list li:last-child { border-bottom: none; }
+    .history-list li .hcode { color: var(--text); }
+
+    /* ── Divider ─────────────────────────────────────────────────────── */
+    .divider { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0; color: var(--text-muted); font-size: 12px; }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+
+    <header>
+      <h1>PROMO<span>.</span>CODES</h1>
+      <p>Generate and validate discount codes instantly.</p>
+    </header>
+
+    <!-- ── Generate panel ── -->
+    <div class="panel">
+      <p class="panel-label">Generate</p>
+      <button class="primary" id="btn-generate">Generate new code</button>
+      <div class="code-box">
+        <span class="code-value empty" id="generated-code">— no code yet —</span>
+        <button class="ghost" id="btn-copy" style="opacity:0;visibility:hidden" tabindex="-1" aria-label="Copy code to clipboard">copy</button>
+      </div>
+      <!-- Error display for generate panel — shown instead of alert() on network/server errors -->
+      <div class="status" id="generate-error" role="status" aria-live="polite"></div>
+    </div>
+
+    <div class="divider">or</div>
+
+    <!-- ── Check panel ── -->
+    <div class="panel">
+      <p class="panel-label">Validate</p>
+      <div class="input-row">
+        <input type="text" id="input-code" placeholder="PROMO-XXXXXXXX" autocomplete="off" />
+        <button class="primary" id="btn-check" style="width:auto; padding:0.65rem 1.2rem">Check</button>
+      </div>
+      <div class="status" id="check-status" role="status" aria-live="polite"></div>
+    </div>
+
+    <!-- ── History panel (shown when codes exist) ── -->
+    <div class="panel history-panel" id="history-panel">
+      <p class="panel-label">Session codes</p>
+      <ul class="history-list" id="history-list"></ul>
+    </div>
+
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────
+       api.js
+       ────────────────────────────────────────────────────────────────
+       Every fetch() call lives here.
+       Returns plain data objects or throws Error with a .message.
+       Zero DOM access. Zero state. Easily mocked in tests.
+  ─────────────────────────────────────────────────────────────────── -->
+  <script>
+    // ── ENVIRONMENT CONFIG ───────────────────────────────────────────
+    //
+    // [CHANGE FOR PRODUCTION]
+    // Replace this URL with your real backend host before deploying.
+    //
+    // Local dev:   "http://localhost:8000/api/v1/promocodes"
+    // Production:  "https://api.yourdomain.com/api/v1/promocodes"
+    //
+    // If your frontend and backend are on the same domain (e.g. served
+    // by nginx on the same server), you can use a relative path instead,
+    // which avoids CORS entirely:
+    //   const API_BASE = "/api/v1/promocodes";
+    //
+    const API_BASE = "http://localhost:8000/api/v1/promocodes";
+
+    // ────────────────────────────────────────────────────────────────
+
+    /**
+     * apiFetch — shared HTTP helper for all API calls.
+     *
+     * Accepts { body, ...rest } so callers pass plain JS objects.
+     * JSON.stringify happens here — callers never deal with it.
+     * Content-Type is only set when a body is present (fixes GET requests).
+     *
+     * Throws a clean Error in two cases:
+     *   1. fetch() itself fails (server down, no network, CORS blocked)
+     *   2. Server responded with a non-2xx status
+     */
+    async function apiFetch(path, { body, ...options } = {}) {
+      const headers = {};
+
+      // Only attach Content-Type when we're actually sending a body.
+      // Sending it on GET requests can cause some servers to reject the request.
+      if (body !== undefined) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      let res;
+      try {
+        res = await fetch(API_BASE + path, {
+          headers,
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+          ...options,
+        });
+      } catch {
+        // fetch() throws TypeError when:
+        //   - the server is unreachable / down
+        //   - there's no internet connection
+        //   - CORS preflight was blocked
+        // [CHANGE FOR PRODUCTION] Adjust this message to match your UX copy.
+        throw new Error("Cannot reach the server. Check your connection.");
+      }
+
+      // Only try to parse JSON if the server says it's sending JSON.
+      // Without this check, a 502 HTML error page from nginx crashes res.json()
+      // and you'd never see the real error message.
+      const isJson = res.headers.get("content-type")?.includes("application/json");
+      const data = isJson ? await res.json() : null;
+
+      if (!res.ok) {
+        // FastAPI puts error details in data.detail — fall back to the HTTP status.
+        throw new Error(data?.detail ?? `Server error: HTTP ${res.status}`);
+      }
+
+      return data;
+    }
+
+    const api = {
+      // Callers pass plain JS objects — apiFetch handles JSON.stringify internally.
+
+      /** POST /generate → { code, message } */
+      generate: () => apiFetch("/generate", { method: "POST" }),
+
+      /** POST /check → { code, valid, message } */
+      check: (code) => apiFetch("/check", { method: "POST", body: { code } }),
+    };
+  </script>
+
+  <!-- ─────────────────────────────────────────────────────────────────
+       ui.js
+       ────────────────────────────────────────────────────────────────
+       Pure DOM functions — no fetch, no state variables.
+       Each function receives data and mutates the DOM accordingly.
+       This makes it trivial to unit test: call the function, check DOM.
+  ─────────────────────────────────────────────────────────────────── -->
+  <script>
+    const ui = {
+      // Cached element refs — looked up once, reused everywhere.
+      $: {
+        generateBtn:   document.getElementById("btn-generate"),
+        generateError: document.getElementById("generate-error"),
+        copyBtn:       document.getElementById("btn-copy"),
+        generatedCode: document.getElementById("generated-code"),
+        checkInput:    document.getElementById("input-code"),
+        checkBtn:      document.getElementById("btn-check"),
+        checkStatus:   document.getElementById("check-status"),
+        historyPanel:  document.getElementById("history-panel"),
+        historyList:   document.getElementById("history-list"),
+      },
+
+      /** Show the generated code in the code box. */
+      showCode(code) {
+        const el = this.$.generatedCode;
+        el.textContent = code;
+        el.classList.remove("empty");
+
+        // FIX (a11y): use opacity+visibility instead of display:none.
+        // display:none removes the button from the accessibility tree entirely —
+        // screen readers can't find it even after it becomes visible.
+        // opacity+visibility hides it visually but keeps it in the tree,
+        // and tabindex="0" makes it keyboard-reachable once shown.
+        const btn = this.$.copyBtn;
+        btn.style.opacity = "1";
+        btn.style.visibility = "visible";
+        btn.setAttribute("tabindex", "0");
+      },
+
+      /** Show/hide the loading state on the generate button. */
+      setGenerating(loading) {
+        this.$.generateBtn.disabled = loading;
+        this.$.generateBtn.textContent = loading ? "Generating…" : "Generate new code";
+      },
+
+      /** Show/hide the loading state on the check button. */
+      setChecking(loading) {
+        this.$.checkBtn.disabled = loading;
+        this.$.checkBtn.textContent = loading ? "…" : "Check";
+      },
+
+      /**
+       * Display a validation result badge under the check input.
+       * @param {boolean|null} valid — null clears/hides the badge.
+       */
+      showStatus(valid, message) {
+        const el = this.$.checkStatus;
+        el.className = "status";
+        if (valid === null) return;
+        el.textContent = message;
+        el.classList.add(valid ? "valid" : "invalid", "visible");
+      },
+
+      /**
+       * FIX (error handling): show a server/network error in the generate panel
+       * instead of alert(). Uses the same status styling as invalid codes —
+       * red, inline, doesn't interrupt the user with a modal.
+       * Pass null to clear.
+       */
+      showError(message) {
+        const el = this.$.generateError;
+        el.className = "status";
+        if (message === null) { return; }
+        el.textContent = message;
+        el.classList.add("invalid", "visible");
+      },
+
+      /** Append a code entry to the session history list. */
+      addToHistory(code) {
+        const li = document.createElement("li");
+        const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        li.innerHTML = `<span class="hcode">${code}</span><span>${time}</span>`;
+        this.$.historyList.prepend(li);
+        this.$.historyPanel.classList.add("visible");
+      },
+
+      /**
+       * FIX (race condition): clear any pending timeout before setting a new one.
+       * Without this, rapid clicks queue multiple timeouts and the label flickers —
+       * e.g. "copy" → "copied!" → "copy" → "copied!" out of order.
+       */
+      flashCopied() {
+        const btn = this.$.copyBtn;
+        btn.textContent = "copied!";
+        if (this._copyTimeout) clearTimeout(this._copyTimeout);
+        this._copyTimeout = setTimeout(() => (btn.textContent = "copy"), 1600);
+      },
+    };
+  </script>
+
+  <!-- ─────────────────────────────────────────────────────────────────
+       app.js
+       ────────────────────────────────────────────────────────────────
+       Wires up events. Uses api.* and ui.* — never touches fetch or
+       querySelector directly. This is the only layer that needs to
+       know about both the API and the DOM.
+  ─────────────────────────────────────────────────────────────────── -->
+  <script>
+    // ── Generate handler ─────────────────────────────────────────────
+    ui.$.generateBtn.addEventListener("click", async () => {
+      ui.setGenerating(true);
+      ui.showError(null); // clear any previous error
+      try {
+        const { code } = await api.generate();
+        ui.showCode(code);
+        ui.addToHistory(code);
+      } catch (err) {
+        // FIX: inline error instead of alert() — doesn't interrupt the user,
+        // stays in context, and disappears naturally on the next attempt.
+        ui.showError(err.message);
+      } finally {
+        ui.setGenerating(false);
+      }
+    });
+
+    // ── Check handler ────────────────────────────────────────────────
+    async function handleCheck() {
+      const code = ui.$.checkInput.value.trim();
+      if (!code) return;
+
+      ui.setChecking(true);
+      ui.showStatus(null); // clear previous result
+      try {
+        const result = await api.check(code);
+        ui.showStatus(result.valid, result.message);
+      } catch (err) {
+        ui.showStatus(false, err.message);
+      } finally {
+        ui.setChecking(false);
+      }
+    }
+
+    ui.$.checkBtn.addEventListener("click", handleCheck);
+
+    // Submit on Enter key — common UX expectation for input fields.
+    ui.$.checkInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleCheck();
+    });
+
+    // ── Copy handler ─────────────────────────────────────────────────
+    ui.$.copyBtn.addEventListener("click", () => {
+      const code = ui.$.generatedCode.textContent;
+      navigator.clipboard.writeText(code).then(() => ui.flashCopied());
+    });
+  </script>
+</body>
+</html>
