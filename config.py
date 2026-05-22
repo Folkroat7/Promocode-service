@@ -11,11 +11,11 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # --- PostgreSQL ---
-    POSTGRES_USER:     str = "promo"
-    POSTGRES_PASSWORD: str = "promo"
+    POSTGRES_USER:     str = "postgres"
+    POSTGRES_PASSWORD: str = "911734"
     POSTGRES_DB:       str = "promodb"
     POSTGRES_HOST:     str = "localhost"
-    POSTGRES_PORT:     int = 5432
+    POSTGRES_PORT:     int = 5433
 
     @property
     def DATABASE_URL(self) -> str:

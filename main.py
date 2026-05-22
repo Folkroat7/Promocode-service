@@ -7,11 +7,11 @@ they all inherit the level and handler set here.
 """
  
 import logging
-import logging.config
 from contextlib import asynccontextmanager
  
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
  
 from config import settings
 from database import init_db
@@ -63,6 +63,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
  
+@app.get("/", response_class=HTMLResponse)
+async def read_index():
+    with open("index.html", "r", encoding="utf-8") as f:
+        return f.read()
+
 app.include_router(promocodes.router, prefix="/api/v1/promocodes", tags=["promocodes"])
 app.include_router(admin.router,      prefix="/api/v1/admin",      tags=["admin"])
  

@@ -6,6 +6,18 @@ import promocode_service
 
 router = APIRouter()
 
+@router.post("/generate", response_model=GenerateResponse, status_code=status.HTTP_201_CREATED)
+async def generate_new_promocode(session: AsyncSession = Depends(get_session)):
+    """Эндпоинт для создания нового уникального промокода."""
+    try:
+        new_code = await promocode_service.generate_code(session)
+        return GenerateResponse(code=new_code)
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_AVAILABLE,
+            detail=str(e)
+        )
+
 @router.get("/validate/{code}", response_model=CheckResponse)
 async def validate_promo(code: str, session: AsyncSession = Depends(get_session)):
     """Просто проверить: существует ли код и можно ли его применить."""

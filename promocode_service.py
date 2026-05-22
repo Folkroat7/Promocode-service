@@ -3,12 +3,30 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from models import PromoCode
 import logging
+import secrets
 
 @dataclass
 class ServiceResult:
     success: bool
     message: str
     promo: PromoCode = None
+
+async def generate_code(session: AsyncSession, prefix: str = "PROMO-") -> str:
+    """Генерирует случайный код и проверяет его уникальность в БД."""
+    
+    for _ in range(10): 
+        raw_code = secrets.token_hex(4).upper()
+        full_code = f"{prefix}{raw_code}"
+        
+        stmt = select(PromoCode).where(PromoCode.code == full_code)
+        result = await session.execute(stmt)
+        if result.scalar_one_or_none() is None:
+            new_promo = PromoCode(code=full_code)
+            session.add(new_promo)
+            await session.commit()
+            return full_code
+            
+    raise RuntimeError("Не удалось сгенерировать уникальный код. База переполнена?")
 
 async def check_code(session: AsyncSession, code: str) -> ServiceResult:
     """Только проверяет существование и валидность, не 'сжигая' промокод."""
@@ -25,7 +43,6 @@ async def check_code(session: AsyncSession, code: str) -> ServiceResult:
 
 async def redeem_code(session: AsyncSession, code: str) -> ServiceResult:
     """Атомарно проверяет и помечает промокод как использованный."""
-    # .with_for_update() блокирует строку до конца транзакции (commit)
     stmt = select(PromoCode).where(PromoCode.code == code.upper()).with_for_update()
     result = await session.execute(stmt)
     promo = result.scalar_one_or_none()
@@ -34,18 +51,11 @@ async def redeem_code(session: AsyncSession, code: str) -> ServiceResult:
         return ServiceResult(False, "Промокод не найден")
     
     if promo.is_used:
-        # Даже если два запроса пришли одновременно, второй увидит True 
-        # благодаря блокировке первого запроса
         return ServiceResult(False, "Промокод уже был использован")
 
     promo.is_used = True
-    await session.commit() # Блокировка снимется здесь
+    await session.commit() 
     
     logging.info(f"Промокод {code} успешно активирован")
     return ServiceResult(True, "Промокод успешно активирован", promo)
-        return False, "Code has already been used."
 
-    # Valid — consume it so it cannot be reused.
-    await mark_used(session, code)
-    logger.info("Code redeemed successfully: %s", code)
-    return True, "Code is valid and has been redeemed."

@@ -246,20 +246,8 @@
        Zero DOM access. Zero state. Easily mocked in tests.
   ─────────────────────────────────────────────────────────────────── -->
   <script>
-    // ── ENVIRONMENT CONFIG ───────────────────────────────────────────
     //
-    // [CHANGE FOR PRODUCTION]
-    // Replace this URL with your real backend host before deploying.
-    //
-    // Local dev:   "http://localhost:8000/api/v1/promocodes"
-    // Production:  "https://api.yourdomain.com/api/v1/promocodes"
-    //
-    // If your frontend and backend are on the same domain (e.g. served
-    // by nginx on the same server), you can use a relative path instead,
-    // which avoids CORS entirely:
-    //   const API_BASE = "/api/v1/promocodes";
-    //
-    const API_BASE = "http://localhost:8000/api/v1/promocodes";
+    const API_BASE = "/api/v1/promocodes";
 
     // ────────────────────────────────────────────────────────────────
 
@@ -291,17 +279,9 @@
           ...options,
         });
       } catch {
-        // fetch() throws TypeError when:
-        //   - the server is unreachable / down
-        //   - there's no internet connection
-        //   - CORS preflight was blocked
-        // [CHANGE FOR PRODUCTION] Adjust this message to match your UX copy.
         throw new Error("Cannot reach the server. Check your connection.");
       }
 
-      // Only try to parse JSON if the server says it's sending JSON.
-      // Without this check, a 502 HTML error page from nginx crashes res.json()
-      // and you'd never see the real error message.
       const isJson = res.headers.get("content-type")?.includes("application/json");
       const data = isJson ? await res.json() : null;
 
