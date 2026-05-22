@@ -1,69 +1,48 @@
-"""
-services/promocode_service.py — Business logic layer.
-
-Rules:
-  • No FastAPI imports — plain Python only.
-  • Raises standard exceptions; the router maps them to HTTP errors.
-  • Returns str or tuple — never dicts, never ORM objects.
-    Keeps the contract explicit and easy to test.
-"""
-
-import logging
-import secrets
-
+from dataclasses import dataclass
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from models import PromoCode
+import logging
 
-from config import settings
-from store import get, mark_used, save
+@dataclass
+class ServiceResult:
+    success: bool
+    message: str
+    promo: PromoCode = None
 
-logger = logging.getLogger(__name__)
+async def check_code(session: AsyncSession, code: str) -> ServiceResult:
+    """Только проверяет существование и валидность, не 'сжигая' промокод."""
+    stmt = select(PromoCode).where(PromoCode.code == code.upper())
+    result = await session.execute(stmt)
+    promo = result.scalar_one_or_none()
 
+    if not promo:
+        return ServiceResult(False, "Промокод не найден")
+    if promo.is_used:
+        return ServiceResult(False, "Промокод уже использован")
+    
+    return ServiceResult(True, "Промокод валиден", promo)
 
-async def generate_code(session: AsyncSession) -> str:
-    """
-    Generate a unique promo code, persist it, and return the code string.
+async def redeem_code(session: AsyncSession, code: str) -> ServiceResult:
+    """Атомарно проверяет и помечает промокод как использованный."""
+    # .with_for_update() блокирует строку до конца транзакции (commit)
+    stmt = select(PromoCode).where(PromoCode.code == code.upper()).with_for_update()
+    result = await session.execute(stmt)
+    promo = result.scalar_one_or_none()
 
-    FIX (#8): was returning dict{"code":..., "created_at":...}.
-    The router only ever used ["code"], so returning str is cleaner
-    and makes the contract explicit — callers know exactly what they get.
-    """
-    for attempt in range(10):
-        raw = "".join(
-            secrets.choice(settings.CODE_ALPHABET)
-            for _ in range(settings.CODE_LENGTH)
-        )
-        code = f"{settings.CODE_PREFIX}-{raw}" if settings.CODE_PREFIX else raw
+    if not promo:
+        return ServiceResult(False, "Промокод не найден")
+    
+    if promo.is_used:
+        # Даже если два запроса пришли одновременно, второй увидит True 
+        # благодаря блокировке первого запроса
+        return ServiceResult(False, "Промокод уже был использован")
 
-        if await get(session, code) is None:
-            await save(session, code)
-            logger.info("Generated code %s on attempt %d", code, attempt + 1)
-            return code
-
-    # This is astronomically unlikely with CODE_LENGTH >= 6,
-    # but we log it as an error if it somehow happens.
-    logger.error("Failed to generate a unique code after 10 attempts")
-    raise RuntimeError("Could not generate a unique code after 10 attempts")
-
-
-async def check_code(session: AsyncSession, raw_code: str) -> tuple[bool, str]:
-    """
-    Validate a promo code and mark it used if valid.
-
-    FIX (#1, #3): mark_used is now called here — a valid code is consumed
-    on first successful check. Without this call, is_used was checked but
-    never set, making the field pointless.
-
-    Returns (is_valid, human_readable_message).
-    """
-    code = raw_code.strip().upper()
-    record = await get(session, code)
-
-    if record is None:
-        logger.info("Check failed — code not found: %s", code)
-        return False, "Code not found."
-
-    if record.is_used:
-        logger.info("Check failed — code already used: %s", code)
+    promo.is_used = True
+    await session.commit() # Блокировка снимется здесь
+    
+    logging.info(f"Промокод {code} успешно активирован")
+    return ServiceResult(True, "Промокод успешно активирован", promo)
         return False, "Code has already been used."
 
     # Valid — consume it so it cannot be reused.
